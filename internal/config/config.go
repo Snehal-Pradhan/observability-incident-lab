@@ -14,6 +14,8 @@ type Config struct {
 	DBMaxConns      int32
 	CacheTTLSeconds int
 	LogLevel        string
+	OTelServiceName string
+	OTelEndpoint    string
 }
 
 func Load() (Config, error) {
@@ -29,6 +31,8 @@ func Load() (Config, error) {
 		DBMaxConns:      10,
 		CacheTTLSeconds: 300,
 		LogLevel:        "info",
+		OTelServiceName: "orders-api",
+		OTelEndpoint:    "otel-collector:4317",
 	}
 
 	if value := os.Getenv("HTTP_PORT"); value != "" {
@@ -69,5 +73,12 @@ func Load() (Config, error) {
 		}
 	}
 
+	if value := os.Getenv("OTEL_SERVICE_NAME"); value != "" {
+    		cfg.OTelServiceName = value
+	}
+
+	if value := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); value != "" {
+    		cfg.OTelEndpoint = value
+	}
 	return cfg, nil
 }

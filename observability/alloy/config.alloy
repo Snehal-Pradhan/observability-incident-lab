@@ -1,0 +1,64 @@
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "api_only" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/observability-incident-lab-api-1"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    target_label  = "container"
+    regex         = "/(.*)"
+    replacement   = "$1"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "orders-api"
+  }
+}
+
+loki.source.docker "api_logs" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.api_only.output
+  forward_to = [loki.process.api_logs.receiver]
+  labels     = {
+    environment = "dev",
+  }
+}
+
+loki.process "api_logs" {
+  stage.json {
+    expressions = {
+      level     = "level",
+      message   = "msg",
+      trace_id  = "trace_id",
+      span_id   = "span_id",
+      method    = "method",
+      route     = "route",
+      status    = "status",
+      duration_ms = "duration_ms",
+    }
+  }
+
+  stage.labels {
+    values = {
+      level = "level",
+      job   = "job",
+    }
+  }
+
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

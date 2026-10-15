@@ -10,7 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/otel"
+
 	"github.com/snehal/observability-incident-lab/internal/config"
+	"github.com/snehal/observability-incident-lab/internal/observability"
 	"github.com/snehal/observability-incident-lab/internal/server"
 	"github.com/snehal/observability-incident-lab/internal/store"
 	"github.com/snehal/observability-incident-lab/migrations"
@@ -26,19 +29,44 @@ func main() {
 		os.Exit(1)
 	}
 
-	startupCtx, startupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	tracingCtx, tracingCancel := context.WithTimeout(
+		context.Background(),
+		5*time.Second,
+	)
+	tracerProvider, err := observability.InitTracing(
+		tracingCtx,
+		cfg.OTelServiceName,
+		cfg.OTelEndpoint,
+	)
+	tracingCancel()
+	if err != nil {
+		logger.Error("tracing initialization failed", "error", err)
+		os.Exit(1)
+	}
+
+	otel.SetTracerProvider(tracerProvider)
+
+	startupCtx, startupCancel := context.WithTimeout(
+		context.Background(),
+		5*time.Second,
+	)
 	pool, err := store.NewPool(startupCtx, cfg.DatabaseURL, cfg.DBMaxConns)
 	startupCancel()
 	if err != nil {
 		logger.Error("database startup failed", "error", err)
+		shutdownTracing(tracerProvider, logger)
 		os.Exit(1)
 	}
 	defer pool.Close()
 
-	migrationCtx, migrationCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	migrationCtx, migrationCancel := context.WithTimeout(
+		context.Background(),
+		30*time.Second,
+	)
 	if err := migrations.Apply(migrationCtx, pool); err != nil {
 		migrationCancel()
 		logger.Error("database migrations failed", "error", err)
+		shutdownTracing(tracerProvider, logger)
 		os.Exit(1)
 	}
 	migrationCancel()
@@ -72,13 +100,17 @@ func main() {
 	case err := <-serverErr:
 		if !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("HTTP server failed", "error", err)
+			shutdownTracing(tracerProvider, logger)
 			os.Exit(1)
 		}
 	case <-signalCtx.Done():
 		logger.Info("shutdown signal received")
 	}
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(
+		context.Background(),
+		10*time.Second,
+	)
 	defer shutdownCancel()
 
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
@@ -88,5 +120,18 @@ func main() {
 		}
 	}
 
+	if err := tracerProvider.Shutdown(shutdownCtx); err != nil {
+		logger.Error("tracing shutdown failed", "error", err)
+	}
+
 	logger.Info("server stopped")
+}
+
+func shutdownTracing(provider interface{ Shutdown(context.Context) error }, logger *slog.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := provider.Shutdown(ctx); err != nil {
+		logger.Error("tracing shutdown failed", "error", err)
+	}
 }

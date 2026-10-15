@@ -1,0 +1,18 @@
+groups:
+  - name: api-alerts
+    rules:
+      - alert: go-observability-alert
+        expr: |
+          (
+            sum(rate(orders_api_http_requests_total{status=~"5.."}[5m]))
+            or vector(0)
+          )
+          /
+          clamp_min(sum(rate(orders_api_http_requests_total[5m])), 1e-9)
+          > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API 5xx error rate is above 5%"
+          description: "More than 5% of API requests have returned HTTP 5xx responses over the last 5 minutes for at least 2 minutes."

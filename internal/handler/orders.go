@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/snehal/observability-incident-lab/internal/model"
+	"github.com/snehal/observability-incident-lab/internal/observability"
 	"github.com/snehal/observability-incident-lab/internal/store"
 )
 
@@ -80,7 +81,10 @@ func (h *OrdersHandler) Create(w http.ResponseWriter, r *http.Request) {
 	defer cacheCancel()
 
 	if err := h.cache.Delete(cacheCtx, fmt.Sprintf("order:%d", order.ID)); err != nil {
+		observability.CacheOperationsTotal.WithLabelValues("delete", "error").Inc()
 		h.logger.Warn("cache invalidation failed", "order_id", order.ID, "error", err)
+	} else {
+		observability.CacheOperationsTotal.WithLabelValues("delete", "success").Inc()
 	}
 
 	writeJSON(w, http.StatusCreated, order)
@@ -99,9 +103,13 @@ func (h *OrdersHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	cached, found, cacheErr := h.cache.Get(cacheCtx, key)
 	cacheCancel()
 
-	if cacheErr != nil {
+	switch {
+	case cacheErr != nil:
+		observability.CacheOperationsTotal.WithLabelValues("get", "error").Inc()
 		h.logger.Warn("cache read failed", "order_id", id, "error", cacheErr)
-	} else if found {
+	case found:
+		observability.CacheOperationsTotal.WithLabelValues("get", "hit").Inc()
+
 		var order model.Order
 		if err := json.Unmarshal(cached, &order); err == nil {
 			writeJSON(w, http.StatusOK, order)
@@ -109,6 +117,8 @@ func (h *OrdersHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.logger.Warn("invalid cached order JSON", "order_id", id)
+	default:
+		observability.CacheOperationsTotal.WithLabelValues("get", "miss").Inc()
 	}
 
 	dbCtx, dbCancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -136,7 +146,10 @@ func (h *OrdersHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	defer setCancel()
 
 	if err := h.cache.Set(setCtx, key, value, h.cacheTTL); err != nil {
+		observability.CacheOperationsTotal.WithLabelValues("set", "error").Inc()
 		h.logger.Warn("cache write failed", "order_id", id, "error", err)
+	} else {
+		observability.CacheOperationsTotal.WithLabelValues("set", "success").Inc()
 	}
 
 	writeJSON(w, http.StatusOK, order)

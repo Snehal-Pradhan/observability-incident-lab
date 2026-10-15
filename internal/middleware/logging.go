@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type statusRecorder struct {
@@ -35,7 +36,6 @@ func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
 			start := time.Now()
 			recorder := &statusRecorder{
 				ResponseWriter: w,
-				status:         0,
 			}
 
 			next.ServeHTTP(recorder, r)
@@ -53,13 +53,23 @@ func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
 				route = r.URL.Path
 			}
 
-			logger.Info("http request",
+			attrs := []any{
 				"method", r.Method,
 				"route", route,
 				"status", status,
 				"duration_ms", time.Since(start).Milliseconds(),
 				"remote_addr", r.RemoteAddr,
-			)
+			}
+
+			spanContext := trace.SpanContextFromContext(r.Context())
+			if spanContext.IsValid() {
+				attrs = append(attrs,
+					"trace_id", spanContext.TraceID().String(),
+					"span_id", spanContext.SpanID().String(),
+				)
+			}
+
+			logger.Info("http request", attrs...)
 		})
 	}
 }

@@ -8,6 +8,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 
 	"github.com/snehal/observability-incident-lab/internal/model"
 )
@@ -50,6 +53,9 @@ func (s *PostgresStore) Ping(ctx context.Context) error {
 }
 
 func (s *PostgresStore) Insert(ctx context.Context, req model.CreateOrderRequest) (model.Order, error) {
+	ctx, span := otel.Tracer("orders-api/store").Start(ctx, "postgres.insert_order")
+	defer span.End()
+	span.SetAttributes(attribute.String("db.system", "postgresql"), attribute.String("db.operation.name", "INSERT"), attribute.String("db.collection.name", "orders"))
 	var order model.Order
 
 	err := s.pool.QueryRow(ctx, `
@@ -64,6 +70,8 @@ func (s *PostgresStore) Insert(ctx context.Context, req model.CreateOrderRequest
 		&order.CreatedAt,
 	)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "insert order failed")
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
 			return model.Order{}, ErrUnknownCustomer
@@ -75,6 +83,9 @@ func (s *PostgresStore) Insert(ctx context.Context, req model.CreateOrderRequest
 }
 
 func (s *PostgresStore) GetByID(ctx context.Context, id int64) (model.Order, bool, error) {
+	ctx, span := otel.Tracer("orders-api/store").Start(ctx, "postgres.get_order")
+	defer span.End()
+	span.SetAttributes(attribute.String("db.system", "postgresql"), attribute.String("db.operation.name", "SELECT"), attribute.String("db.collection.name", "orders"))
 	var order model.Order
 
 	err := s.pool.QueryRow(ctx, `
@@ -92,6 +103,8 @@ func (s *PostgresStore) GetByID(ctx context.Context, id int64) (model.Order, boo
 		return model.Order{}, false, nil
 	}
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "get order by ID failed")
 		return model.Order{}, false, fmt.Errorf("get order by ID: %w", err)
 	}
 
@@ -99,6 +112,9 @@ func (s *PostgresStore) GetByID(ctx context.Context, id int64) (model.Order, boo
 }
 
 func (s *PostgresStore) ListByCustomer(ctx context.Context, customerID int64) ([]model.Order, error) {
+	ctx, span := otel.Tracer("orders-api/store").Start(ctx, "postgres.list_customer_orders")
+	defer span.End()
+	span.SetAttributes(attribute.String("db.system", "postgresql"), attribute.String("db.operation.name", "SELECT"), attribute.String("db.collection.name", "orders"))
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, customer_id, status, total_cents, created_at
 		FROM orders
@@ -107,6 +123,8 @@ func (s *PostgresStore) ListByCustomer(ctx context.Context, customerID int64) ([
 		LIMIT 50
 	`, customerID)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "list customer orders failed")
 		return nil, fmt.Errorf("list orders by customer: %w", err)
 	}
 	defer rows.Close()
@@ -121,12 +139,16 @@ func (s *PostgresStore) ListByCustomer(ctx context.Context, customerID int64) ([
 			&order.TotalCents,
 			&order.CreatedAt,
 		); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "scan order failed")
 			return nil, fmt.Errorf("scan order: %w", err)
 		}
 		orders = append(orders, order)
 	}
 
 	if err := rows.Err(); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "iterate orders failed")
 		return nil, fmt.Errorf("iterate orders: %w", err)
 	}
 
