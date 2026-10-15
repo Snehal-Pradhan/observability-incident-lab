@@ -1,0 +1,107 @@
+PulseOps: Requirements
+
+Requirements are grouped by type. Each has an ID so you can reference it in your README, commits, and issues, and tick it off as you build.
+
+1. Project goal
+
+Build a local, self-hosted lab that demonstrates the full reliability loop: detect, diagnose, fix, verify. A realistic service is deliberately overloaded and faulted, investigated using metrics, logs, and traces, repaired, and proven healthy with a repeatable load test.
+
+2. Functional requirements
+2.1 Application (Orders API)
+ID	Requirement
+FR-1	POST /orders writes an order to Postgres and invalidates the related Redis cache entry
+FR-2	GET /orders/{id} reads from Redis first and falls back to Postgres on a miss
+FR-3	GET /customers/{id}/orders serves as the bottleneck endpoint for the incident scenario
+FR-4	GET /health (liveness) and GET /ready (readiness, checks Postgres and Redis) exist
+FR-5	GET /metrics exposes Prometheus metrics
+FR-6	POST /admin/faults toggles fault injection (latency, errors, pool limits), enabled only when FAULTS_ENABLED=true
+FR-7	Fault scenarios are deterministic and configurable, not random
+FR-8	A seed script loads sample customers and orders into Postgres
+2.2 Telemetry
+ID	Requirement
+FR-9	The API emits RED metrics per route: request rate, error rate, and duration histograms
+FR-10	The API emits runtime metrics (goroutines or threads, memory, GC) and DB connection pool stats
+FR-11	The API emits traces with spans for the HTTP handler, Postgres queries, and Redis calls
+FR-12	Logs are structured JSON containing trace_id, span_id, service, route, and level
+FR-13	Latency histograms carry exemplars that link to traces
+FR-14	Metrics use route templates (/orders/{id}), never raw paths
+2.3 Collection and storage
+ID	Requirement
+FR-15	OpenTelemetry Collector receives OTLP traces from the API and exports them to Tempo
+FR-16	Grafana Alloy collects container logs and pushes them to Loki
+FR-17	Prometheus scrapes the API, cAdvisor, Postgres Exporter, and Redis Exporter
+FR-18	Prometheus stores metrics and evaluates recording and alert rules
+2.4 Visualization and correlation
+ID	Requirement
+FR-19	Grafana datasources (Prometheus, Loki, Tempo) are provisioned automatically, with no manual setup
+FR-20	One main dashboard, “PulseOps: Service Health”, shows request rate, error rate, p50/p95/p99 latency, in-flight requests, status codes by route, CPU and RAM, DB pool usage, cache hit ratio, and active alerts
+FR-21	A user can navigate metric spike, exemplar, trace, and correlated logs inside Grafana
+FR-22	A user can navigate from a log line to its trace via trace_id
+2.5 Load testing
+ID	Requirement
+FR-23	k6 scenarios exist for baseline, ramp-up, spike, soak, and recovery
+FR-24	Each scenario has thresholds that fail the run if SLIs are breached
+FR-25	Scenarios are runnable through make targets with fixed parameters
+2.6 SLOs and alerting
+ID	Requirement
+FR-26	Availability SLO: 99.5% non-5xx over 28 days, excluding /health and /ready
+FR-27	Latency SLO: 95% of requests under the chosen threshold (for example 300 ms) over 28 days
+FR-28	Alerts: ErrorBudgetFastBurn (14.4× over 1h and 5m, page), ErrorBudgetSlowBurn (6× over 6h and 30m, ticket), HighP95Latency, and DBPoolSaturated
+FR-29	Every alert has a severity, a description, and a runbook link
+FR-30	Alertmanager groups and routes alerts to Slack or email
+FR-31	Alert rules are unit-tested with promtool test rules
+FR-32	Alerts are proven to both fire and resolve during an experiment
+3. Non-functional requirements
+ID	Requirement
+NFR-1	One-command start: make up brings up the full stack from a clean clone
+NFR-2	Reproducible: pinned image versions, fixed k6 parameters, .env.example provided
+NFR-3	Resource-aware: runs on a laptop with about 8 GB RAM (document the actual minimum you measure)
+NFR-4	Cardinality-safe: no user IDs, raw URLs, or trace IDs as metric labels
+NFR-5	Retention limits set on Prometheus, Loki, and Tempo
+NFR-6	Secure defaults: Grafana auth enabled, no anonymous admin, no secrets committed, fault endpoint off by default
+NFR-7	Accurate health signals: health checks excluded from SLO math and alerts
+NFR-8	Consistent labeling: the same service and env labels across metrics, logs, and traces
+4. Infrastructure requirements
+ID	Requirement
+IR-1	Docker 24+ and Docker Compose v2
+IR-2	make, k6, and Git on the host
+IR-3	Services in Compose: Orders API, Postgres, Redis, OTel Collector, Alloy, Prometheus, Loki, Tempo, Grafana, Alertmanager, cAdvisor, Postgres Exporter, Redis Exporter
+IR-4	Health checks and depends_on ordering so startup is reliable
+IR-5	Named volumes for Postgres and the telemetry stores
+5. Evidence and documentation requirements
+ID	Requirement
+DR-1	README with TL;DR, quick start, architecture diagram, and design decisions
+DR-2	One real incident report (experiments/incident-001/REPORT.md) with timeline, detection, impact, root cause, evidence, fix, verification, and follow-ups
+DR-3	The root cause is found from telemetry, not from remembering where the bug was planted
+DR-4	Before/after table from the same k6 workload: p95, p99, error rate, throughput, and peak CPU
+DR-5	Test conditions recorded: hardware, OS, Docker version, commit SHA, exact k6 command
+DR-6	Raw results committed in experiments/
+DR-7	Runbooks for each alert in runbooks/
+DR-8	docs/slo.md explaining SLIs, SLOs, and error budget math
+DR-9	ADRs in docs/decisions/ covering Tempo vs Jaeger, Alloy vs Promtail, and the metrics path
+DR-10	A “Known limitations” section and a short roadmap
+DR-11	Dashboard screenshot from a real stress run, plus an investigation GIF
+DR-12	Demo video of 90 seconds or less: baseline, load, alert, trace, logs, fix, recovery
+DR-13	A “What I learned” section with honest reflections
+DR-14	No invented numbers anywhere. Every figure is measured
+6. CI requirements
+ID	Requirement
+CI-1	GitHub Actions runs on every pull request
+CI-2	Steps: unit tests, lint, promtool check rules, promtool test rules, dashboard JSON validation, docker compose config, and a k6 smoke test
+CI-3	A green CI badge appears in the README
+7. Repository requirements
+pulseops/
+├── app/
+├── load-tests/
+├── observability/
+│   ├── prometheus/  grafana/  loki/  alloy/
+│   ├── tempo/  otel-collector/  alertmanager/
+├── runbooks/
+├── experiments/
+├── docs/
+│   ├── img/  decisions/  slo.md  architecture.md
+├── .github/workflows/
+├── docker-compose.yml
+├── Makefile
+├── .env.example
+└── README.md
