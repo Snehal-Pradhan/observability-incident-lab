@@ -1,0 +1,43 @@
+i# Version control
+.git
+.gitignore
+.github
+
+# Secrets and local config (never bake into an image)
+.env
+.env.*
+!.env.example
+
+# Docker files (not needed inside the image)
+Dockerfile
+.dockerignore
+docker-compose*.yml
+compose*.yml
+
+# Build output and test artifacts
+bin/
+dist/
+tmp/
+*.exe
+*.test
+*.out
+coverage.*
+
+# Docs and local-only material
+docs/
+*.md
+LICENSE
+Makefile
+
+# Editor and OS junk
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Data and experiment output (added later in the lab)
+experiments/
+load-tests/
+observability/
+runbooks/
